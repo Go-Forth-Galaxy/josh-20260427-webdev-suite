@@ -1,0 +1,982 @@
+// Prisma Schema for Go-Forth Nebula CRM
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// Users & Authentication
+// ============================================
+
+enum UserRole {
+  ADMIN
+  OFFICE_STAFF
+  SALES_REP
+  TECHNICIAN
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String?  @map("password_hash") // Nullable for OAuth users
+  googleId          String?  @unique @map("google_id") // Google OAuth ID
+  authProvider      String   @default("google") @map("auth_provider") // "email" or "google"
+  profilePicture    String?  @map("profile_picture") // Google profile picture URL
+  role              UserRole @default(TECHNICIAN)
+  firstName         String   @map("first_name")
+  lastName          String   @map("last_name")
+  phone             String?
+  isActive          Boolean  @default(true) @map("is_active")
+  accessProfileId   String?  @map("access_profile_id") // Access Control Profile
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  sessions                 Session[]
+  locations                UserLocation[]
+  createdNotes             CustomerNote[]
+  assignedTasks            Task[]                     @relation("AssignedTasks")
+  createdTasks             Task[]                     @relation("CreatedTasks")
+  notifications            Notification[]
+  appointments             Appointment[]
+  technicianLocations      TechnicianLocation[]
+  technicianCheckIns       TechnicianCheckIn[]
+  routes                   Route[]
+  serviceRecords           ServiceRecord[]
+  technicianRoutesHistory  TechnicianRouteHistory[]
+  technicianPerformance    TechnicianPerformance[]
+  salesLeads               SalesLead[]
+  inventoryTransactions    InventoryTransaction[]
+  technicianInventory      TechnicianInventory[]
+  chatMessages             ChatMessage[]
+  aiActivityLogs           AIActivityLog[]
+  accessProfile            AccessControlProfile?      @relation("UserAccessProfile", fields: [accessProfileId], references: [id])
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model UserLocation {
+  userId     String @map("user_id")
+  locationId String @map("location_id")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, locationId])
+  @@map("user_locations")
+}
+
+// ============================================
+// Locations & Organizations
+// ============================================
+
+model Location {
+  id                String  @id @default(cuid())
+  name              String
+  address           String
+  city              String
+  state             String
+  zip               String
+  phone             String
+  timezone          String  @default("America/New_York")
+  serviceAreaRadius Int?    @map("service_area_radius")
+  settings          Json?   @map("settings_json")
+  isActive          Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users                     UserLocation[]
+  customers                 Customer[]
+  routes                    Route[]
+  dailyReports              DailyReport[]
+  inventory                 Inventory[]
+  commissionDeductionTypes  CommissionDeductionType[]
+
+  @@map("locations")
+}
+
+// ============================================
+// Customers
+// ============================================
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  LEAD
+  SUSPENDED
+}
+
+model Customer {
+  id          String         @id @default(cuid())
+  firstName   String         @map("first_name")
+  lastName    String         @map("last_name")
+  companyName String?        @map("company_name")
+  email       String?
+  phone       String
+  phone2      String?        @map("phone_2")
+  address     String
+  city        String
+  state       String
+  zip         String
+  locationId  String         @map("location_id")
+  latitude    Float?
+  longitude   Float?
+  source      String?
+  status      CustomerStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  location           Location           @relation(fields: [locationId], references: [id])
+  properties         CustomerProperty[]
+  notes              CustomerNote[]
+  contacts           CustomerContact[]
+  flags              CustomerFlag[]
+  subscriptions      Subscription[]
+  appointments       Appointment[]
+  serviceRecords     ServiceRecord[]
+  invoices           Invoice[]
+  payments           Payment[]
+  paymentMethods     PaymentMethod[]
+  autopaySettings    AutopaySettings?
+  salesLeads         SalesLead[]
+
+  @@index([locationId])
+  @@index([email])
+  @@index([status])
+  @@map("customers")
+}
+
+model CustomerProperty {
+  id           String  @id @default(cuid())
+  customerId   String  @map("customer_id")
+  propertyType String  @map("property_type")
+  address      String
+  isPrimary    Boolean @default(false) @map("is_primary")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_properties")
+}
+
+model CustomerNote {
+  id         String   @id @default(cuid())
+  customerId String   @map("customer_id")
+  userId     String   @map("user_id")
+  noteText   String   @map("note_text") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([customerId])
+  @@map("customer_notes")
+}
+
+model CustomerContact {
+  id           String  @id @default(cuid())
+  customerId   String  @map("customer_id")
+  name         String
+  relationship String
+  phone        String?
+  email        String?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_contacts")
+}
+
+enum CustomerFlagType {
+  PAID_IN_FULL
+  PREFERS_PAPER
+  SALES_REP_APAY
+  PURPLE_DRAGON
+  SWITCH_OVER
+}
+
+model CustomerFlag {
+  id         String           @id @default(cuid())
+  customerId String           @map("customer_id")
+  flagType   CustomerFlagType @map("flag_type")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, flagType])
+  @@map("customer_flags")
+}
+
+// ============================================
+// Services & Subscriptions
+// ============================================
+
+enum ServiceCategory {
+  PEST_CONTROL
+  LAWN_CARE
+  OTHER
+}
+
+model ServiceType {
+  id              String          @id @default(cuid())
+  name            String
+  category        ServiceCategory @default(PEST_CONTROL)
+  durationMinutes Int             @map("duration_minutes")
+  price           Float
+  description     String?         @db.Text
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  subscriptions    Subscription[]
+  appointments     Appointment[]
+  serviceRecords   ServiceRecord[]
+  bundleInclusions ServiceBundleInclusion[]
+
+  @@map("service_types")
+}
+
+enum SubscriptionFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELED
+  COMPLETED
+}
+
+model Subscription {
+  id            String                @id @default(cuid())
+  customerId    String                @map("customer_id")
+  serviceTypeId String                @map("service_type_id")
+  frequency     SubscriptionFrequency
+  startDate     DateTime              @map("start_date")
+  endDate       DateTime?             @map("end_date")
+  status        SubscriptionStatus    @default(ACTIVE)
+  billingType   String                @map("billing_type")
+  createdAt     DateTime              @default(now()) @map("created_at")
+
+  customer    Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
+
+  @@index([customerId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model ServiceBundle {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  inclusions ServiceBundleInclusion[]
+
+  @@map("service_bundles")
+}
+
+model ServiceBundleInclusion {
+  id              String @id @default(cuid())
+  bundleId        String @map("bundle_id")
+  serviceTypeId   String @map("service_type_id")
+
+  bundle      ServiceBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  serviceType ServiceType   @relation(fields: [serviceTypeId], references: [id])
+
+  @@unique([bundleId, serviceTypeId])
+  @@map("service_bundle_inclusions")
+}
+
+// ============================================
+// Scheduling & Appointments
+// ============================================
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  EN_ROUTE
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  REGULAR
+  INITIAL
+  RESERVICE
+  INSPECTION
+}
+
+model Appointment {
+  id                   String            @id @default(cuid())
+  customerId           String            @map("customer_id")
+  technicianId         String?           @map("technician_id")
+  routeId              String?           @map("route_id")
+  serviceTypeId        String            @map("service_type_id")
+  scheduledDate        DateTime          @map("scheduled_date") @db.Date
+  scheduledTime        DateTime          @map("scheduled_time")
+  duration             Int               @default(60)
+  status               AppointmentStatus @default(SCHEDULED)
+  appointmentType      AppointmentType   @default(REGULAR) @map("appointment_type")
+  specialInstructions  String?           @map("special_instructions") @db.Text
+  isLocked             Boolean           @default(false) @map("is_locked")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  customer          Customer             @relation(fields: [customerId], references: [id])
+  technician        User?                @relation(fields: [technicianId], references: [id])
+  serviceType       ServiceType          @relation(fields: [serviceTypeId], references: [id])
+  route             Route?               @relation(fields: [routeId], references: [id])
+  routeAppointments RouteAppointment[]
+  jobPool           JobPool?
+  serviceRecord     ServiceRecord?
+  reminders         AppointmentReminder[]
+  checkIns          TechnicianCheckIn[]
+
+  @@index([customerId])
+  @@index([technicianId])
+  @@index([scheduledDate])
+  @@index([status])
+  @@map("appointments")
+}
+
+enum RouteStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+model Route {
+  id            String      @id @default(cuid())
+  date          DateTime    @db.Date
+  technicianId  String      @map("technician_id")
+  locationId    String      @map("location_id")
+  status        RouteStatus @default(PENDING)
+  totalDistance Float?      @map("total_distance")
+  totalDuration Int?        @map("total_duration")
+  isOptimized   Boolean     @default(false) @map("is_optimized")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  technician        User               @relation(fields: [technicianId], references: [id])
+  location          Location           @relation(fields: [locationId], references: [id])
+  appointments      Appointment[]
+  routeAppointments RouteAppointment[]
+
+  @@index([date])
+  @@index([technicianId])
+  @@map("routes")
+}
+
+model RouteAppointment {
+  id             String @id @default(cuid())
+  routeId        String @map("route_id")
+  appointmentId  String @map("appointment_id")
+  sequenceOrder  Int    @map("sequence_order")
+
+  route       Route       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, appointmentId])
+  @@index([routeId])
+  @@map("route_appointments")
+}
+
+model JobPool {
+  id                  String    @id @default(cuid())
+  appointmentId       String    @unique @map("appointment_id")
+  priority            Int       @default(0)
+  requestedDateStart  DateTime? @map("requested_date_start") @db.Date
+  requestedDateEnd    DateTime? @map("requested_date_end") @db.Date
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([priority])
+  @@map("job_pool")
+}
+
+// ============================================
+// Technician Tracking
+// ============================================
+
+model TechnicianLocation {
+  id           String   @id @default(cuid())
+  technicianId String   @map("technician_id")
+  latitude     Float
+  longitude    Float
+  accuracy     Float?
+  timestamp    DateTime @default(now())
+  isActive     Boolean  @default(true) @map("is_active")
+
+  technician User @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([technicianId])
+  @@index([timestamp])
+  @@map("technician_locations")
+}
+
+model TechnicianCheckIn {
+  id            String    @id @default(cuid())
+  appointmentId String    @map("appointment_id")
+  technicianId  String    @map("technician_id")
+  checkInTime   DateTime  @map("check_in_time")
+  checkOutTime  DateTime? @map("check_out_time")
+  latitude      Float
+  longitude     Float
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  technician  User        @relation(fields: [technicianId], references: [id])
+
+  @@index([appointmentId])
+  @@index([technicianId])
+  @@map("technician_check_ins")
+}
+
+model TechnicianRouteHistory {
+  id                 String   @id @default(cuid())
+  technicianId       String   @map("technician_id")
+  date               DateTime @db.Date
+  startTime          DateTime @map("start_time")
+  endTime            DateTime @map("end_time")
+  totalDistance      Float    @map("total_distance")
+  totalAppointments  Int      @map("total_appointments")
+
+  technician User @relation(fields: [technicianId], references: [id])
+
+  @@index([technicianId])
+  @@index([date])
+  @@map("technician_routes_history")
+}
+
+// ============================================
+// Service Records
+// ============================================
+
+model ServiceRecord {
+  id            String   @id @default(cuid())
+  appointmentId String   @unique @map("appointment_id")
+  customerId    String   @map("customer_id")
+  technicianId  String   @map("technician_id")
+  serviceTypeId String   @map("service_type_id")
+  serviceDate   DateTime @map("service_date")
+  notes         String?  @db.Text
+  beforePhotos  String[] @map("before_photos")
+  afterPhotos   String[] @map("after_photos")
+  signatureUrl  String?  @map("signature_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  appointment    Appointment     @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  technician     User            @relation(fields: [technicianId], references: [id])
+  serviceType    ServiceType     @relation(fields: [serviceTypeId], references: [id])
+  chemicalsUsed  ChemicalUsed[]
+  serviceIssues  ServiceIssue[]
+
+  @@index([customerId])
+  @@index([technicianId])
+  @@map("service_records")
+}
+
+model ChemicalUsed {
+  id              String  @id @default(cuid())
+  serviceRecordId String  @map("service_record_id")
+  chemicalId      String  @map("chemical_id")
+  quantity        Float
+  unit            String
+
+  serviceRecord ServiceRecord @relation(fields: [serviceRecordId], references: [id], onDelete: Cascade)
+  chemical      Chemical      @relation(fields: [chemicalId], references: [id])
+
+  @@index([serviceRecordId])
+  @@map("chemicals_used")
+}
+
+model ServiceIssue {
+  id              String   @id @default(cuid())
+  serviceRecordId String   @map("service_record_id")
+  issueType       String   @map("issue_type")
+  description     String   @db.Text
+  resolved        Boolean  @default(false)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  serviceRecord ServiceRecord @relation(fields: [serviceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([serviceRecordId])
+  @@map("service_issues")
+}
+
+// ============================================
+// Billing & Payments
+// ============================================
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  customerId    String        @map("customer_id")
+  invoiceNumber String        @unique @map("invoice_number")
+  amount        Float
+  tax           Float         @default(0)
+  total         Float
+  dueDate       DateTime      @map("due_date")
+  status        InvoiceStatus @default(PENDING)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  customer     Customer       @relation(fields: [customerId], references: [id])
+  items        InvoiceItem[]
+  payments     Payment[]
+
+  @@index([customerId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String @id @default(cuid())
+  invoiceId   String @map("invoice_id")
+  description String
+  quantity    Int
+  unitPrice   Float  @map("unit_price")
+  total       Float
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+enum PaymentMethodType {
+  CREDIT_CARD
+  CHECK
+  CASH
+  AUTOPAY
+}
+
+model Payment {
+  id             String            @id @default(cuid())
+  invoiceId      String            @map("invoice_id")
+  customerId     String            @map("customer_id")
+  amount         Float
+  paymentMethod  PaymentMethodType @map("payment_method")
+  transactionId  String?           @map("transaction_id")
+  paymentDate    DateTime          @map("payment_date")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([invoiceId])
+  @@index([customerId])
+  @@map("payments")
+}
+
+model PaymentMethod {
+  id                    String   @id @default(cuid())
+  customerId            String   @map("customer_id")
+  type                  String
+  stripePaymentMethodId String?  @map("stripe_payment_method_id")
+  lastFour              String?  @map("last_four")
+  isDefault             Boolean  @default(false) @map("is_default")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  customer          Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  autopaySettings   AutopaySettings[]
+
+  @@index([customerId])
+  @@map("payment_methods")
+}
+
+model AutopaySettings {
+  id              String  @id @default(cuid())
+  customerId      String  @unique @map("customer_id")
+  paymentMethodId String  @map("payment_method_id")
+  enabled         Boolean @default(true)
+  billingFrequency String @map("billing_frequency")
+
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
+  @@map("autopay_settings")
+}
+
+// ============================================
+// Inventory & Chemicals
+// ============================================
+
+model Chemical {
+  id           String   @id @default(cuid())
+  name         String
+  epaNumber    String?  @map("epa_number")
+  manufacturer String?
+  unitType     String   @map("unit_type")
+  unitCost     Float    @map("unit_cost")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  inventory             Inventory[]
+  technicianInventory   TechnicianInventory[]
+  inventoryTransactions InventoryTransaction[]
+  chemicalsUsed         ChemicalUsed[]
+
+  @@map("chemicals")
+}
+
+model Inventory {
+  id              String    @id @default(cuid())
+  locationId      String    @map("location_id")
+  chemicalId      String    @map("chemical_id")
+  quantity        Float
+  minQuantity     Float     @map("min_quantity")
+  lastRestockDate DateTime? @map("last_restock_date")
+
+  location Location @relation(fields: [locationId], references: [id])
+  chemical Chemical @relation(fields: [chemicalId], references: [id])
+
+  @@unique([locationId, chemicalId])
+  @@map("inventory")
+}
+
+model TechnicianInventory {
+  id           String   @id @default(cuid())
+  technicianId String   @map("technician_id")
+  chemicalId   String   @map("chemical_id")
+  quantity     Float
+  date         DateTime @db.Date
+
+  technician User     @relation(fields: [technicianId], references: [id])
+  chemical   Chemical @relation(fields: [chemicalId], references: [id])
+
+  @@unique([technicianId, chemicalId, date])
+  @@map("technician_inventory")
+}
+
+enum InventoryTransactionType {
+  RESTOCK
+  USAGE
+  TRANSFER
+}
+
+model InventoryTransaction {
+  id         String                   @id @default(cuid())
+  chemicalId String                   @map("chemical_id")
+  locationId String                   @map("location_id")
+  type       InventoryTransactionType
+  quantity   Float
+  date       DateTime
+  userId     String                   @map("user_id")
+  notes      String?                  @db.Text
+
+  chemical Chemical @relation(fields: [chemicalId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([chemicalId])
+  @@index([date])
+  @@map("inventory_transactions")
+}
+
+// ============================================
+// Communication & Alerts
+// ============================================
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String           @db.Text
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+enum ReminderType {
+  SMS
+  EMAIL
+  VOICE
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  SENT
+  FAILED
+}
+
+model AppointmentReminder {
+  id                String         @id @default(cuid())
+  appointmentId     String         @map("appointment_id")
+  reminderType      ReminderType   @map("reminder_type")
+  scheduledSendTime DateTime       @map("scheduled_send_time")
+  sentAt            DateTime?      @map("sent_at")
+  status            ReminderStatus @default(SCHEDULED)
+  createdAt         DateTime       @default(now()) @map("created_at")
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([status])
+  @@map("appointment_reminders")
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Alert {
+  id        String        @id @default(cuid())
+  userId    String        @map("user_id")
+  alertType String        @map("alert_type")
+  severity  AlertSeverity
+  message   String        @db.Text
+  resolved  Boolean       @default(false)
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([resolved])
+  @@map("alerts")
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  assignedToId  String       @map("assigned_to_id")
+  createdById   String       @map("created_by_id")
+  title         String
+  description   String?      @db.Text
+  dueDate       DateTime?    @map("due_date")
+  status        TaskStatus   @default(PENDING)
+  priority      TaskPriority @default(MEDIUM)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  assignedTo User @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  createdBy  User @relation("CreatedTasks", fields: [createdById], references: [id])
+
+  @@index([assignedToId])
+  @@index([status])
+  @@map("tasks")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  role      String   // 'user' or 'assistant'
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+// ============================================
+// Reporting & Analytics
+// ============================================
+
+model DailyReport {
+  id                    String   @id @default(cuid())
+  locationId            String   @map("location_id")
+  date                  DateTime @db.Date
+  totalRevenue          Float    @map("total_revenue")
+  appointmentsCompleted Int      @map("appointments_completed")
+  newCustomers          Int      @map("new_customers")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([locationId, date])
+  @@map("daily_reports")
+}
+
+model TechnicianPerformance {
+  id                    String   @id @default(cuid())
+  technicianId          String   @map("technician_id")
+  date                  DateTime @db.Date
+  appointmentsCompleted Int      @map("appointments_completed")
+  revenueGenerated      Float    @map("revenue_generated")
+  avgRating             Float?   @map("avg_rating")
+
+  technician User @relation(fields: [technicianId], references: [id])
+
+  @@unique([technicianId, date])
+  @@map("technician_performance")
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+model SalesLead {
+  id           String     @id @default(cuid())
+  customerName String     @map("customer_name")
+  phone        String
+  email        String?
+  source       String?
+  status       LeadStatus @default(NEW)
+  assignedToId String?    @map("assigned_to_id")
+  customerId   String?    @map("customer_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  assignedTo User?     @relation(fields: [assignedToId], references: [id])
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([status])
+  @@index([assignedToId])
+  @@map("sales_leads")
+}
+
+// ============================================
+// AI Settings
+// ============================================
+
+model AISettings {
+  id        Int      @id @default(1)
+  settings  Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_settings")
+}
+
+model AIActivityLog {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  userName      String   @map("user_name")
+  userEmail     String   @map("user_email")
+  userRole      String   @map("user_role")
+  action        String   // e.g., "create_appointment", "search_customer", "chat_message"
+  toolCalled    String?  @map("tool_called") // Name of the AI tool that was called
+  toolInput     Json?    @map("tool_input") // Input parameters to the tool
+  toolOutput    Json?    @map("tool_output") // Tool execution result
+  userMessage   String?  @map("user_message") @db.Text // User's message to AI
+  aiResponse    String?  @map("ai_response") @db.Text // AI's response
+  success       Boolean  @default(true)
+  errorMessage  String?  @map("error_message") @db.Text
+  duration      Int?     // Duration in milliseconds
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("ai_activity_log")
+}
+// ============================================
+// Access Control Profiles
+// ============================================
+
+model AccessControlProfile {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  isGlobal    Boolean  @default(false) @map("is_global") // Available to all offices
+  isSystem    Boolean  @default(false) @map("is_system") // System reserved profiles (cannot be deleted)
+  notes       String?  @db.Text
+  permissions Json     // Stores all permission settings as JSON
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users User[] @relation("UserAccessProfile")
+
+  @@map("access_control_profiles")
+}
+
+// ============================================
+// Commission Settings
+// ============================================
+
+model CommissionDeductionType {
+  id          String   @id @default(cuid())
+  description String
+  isGlobal    Boolean  @default(false) @map("is_global") // Available to all offices vs office-specific
+  locationId  String?  @map("location_id") // null if global, set if office-specific
+  isVisible   Boolean  @default(true) @map("is_visible")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@map("commission_deduction_types")
+}
+
+// ============================================
+// GL Accounts (Global)
+// ============================================
+
+model GLAccount {
+  id            String   @id @default(cuid())
+  accountNumber String   @unique @map("account_number")
+  title         String
+  description   String?  @db.Text
+  isVisible     Boolean  @default(true) @map("is_visible")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("gl_accounts")
+}
